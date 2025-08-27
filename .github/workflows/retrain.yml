@@ -1,0 +1,45 @@
+name: Retrain and Promote Model
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '0 0 * * 0'  # Runs weekly on Sunday at midnight
+  workflow_dispatch:
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+      - name: Run training script
+        run: |
+          python train.py
+      - name: Upload exported model
+        uses: actions/upload-artifact@v3
+        with:
+          name: exported-model
+          path: exports/
+      - name: Start TensorFlow Serving (Docker)
+        run: |
+          docker run -d --rm -p 8501:8501 \
+            -v ${{ github.workspace }}/exports:/models/my_model \
+            -e MODEL_NAME=my_model \
+            tensorflow/serving
+      - name: Wait for TensorFlow Serving to start
+        run: |
+          for i in {1..30}; do
+            if curl -s http://localhost:8501/v1/models/my_model; then
+              echo "TensorFlow Serving is up!"; break
+            fi
+            echo "Waiting for TensorFlow Serving..."; sleep 2
+          done
+      - name: Test inference with main.py
+        run: |
+          python main.py
