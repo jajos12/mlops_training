@@ -26,8 +26,13 @@ test_samples = X_test_scaled[0:5]
 
 data = json.dumps({"instances": test_samples.tolist()})
 
-url = 'http://localhost:8501/v1/models/my_model:predict'
-headers = {"content-type": "application/json"}
+
+# Update: Send request to FastAPI proxy endpoint with API key
+url = 'http://localhost:8000/predict'
+headers = {
+	"content-type": "application/json",
+	"x-api-key": "my-secret-key"  # Must match the key in proxy_api.py
+}
 
 json_response = requests.post(url, data=data, headers=headers)
 
