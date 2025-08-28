@@ -11,6 +11,10 @@ MIN_ACCURACY = 0.97
 BASE_MODEL_DIR = 'exports'
 MODEL_NAME = 'my_model'
 
+# Ensure the exports directory exists
+if not os.path.exists(BASE_MODEL_DIR):
+    os.makedirs(BASE_MODEL_DIR)
+
 # --- Step 1: Data Preparation ---
 print("Loading and preparing dataset...")
 data = load_breast_cancer()

@@ -54,3 +54,6 @@ jobs:
       - name: Test inference with main.py (via FastAPI Proxy)
         run: |
           python main.py
+      - name: Run canary test (compare previous and new model)
+        run: |
+          python canary_test.py --version_a=1 --version_b=2
