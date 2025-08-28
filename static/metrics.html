@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>API Metrics Visualizer</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; background: #f7f7f7; }
+        h2 { color: #333; }
+        #metrics-table { border-collapse: collapse; width: 100%; background: #fff; margin-top: 24px; }
+        #metrics-table th, #metrics-table td { border: 1px solid #ccc; padding: 8px 12px; text-align: left; }
+        #metrics-table th { background: #1976d2; color: #fff; }
+        #metrics-table tr:nth-child(even) { background: #f2f2f2; }
+        .error { color: #b71c1c; margin-top: 20px; }
+        .refresh-btn { margin-top: 16px; padding: 8px 18px; background: #1976d2; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+        .refresh-btn:hover { background: #125ea2; }
+        .charts-container { display: flex; flex-wrap: wrap; gap: 32px; margin-top: 32px; }
+        .chart-box { background: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.07); padding: 18px; flex: 1 1 350px; min-width: 320px; }
+        .chart-title { text-align: center; font-weight: bold; margin-bottom: 8px; color: #1976d2; }
+        .summary-cards { display: flex; gap: 24px; margin-top: 24px; }
+        .summary-card { background: #fff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.07); padding: 18px 32px; font-size: 1.1em; color: #1976d2; flex: 1 1 180px; text-align: center; }
+        .gauge-box { display: flex; flex-direction: column; align-items: center; }
+        .gauge-label { margin-top: 8px; color: #444; }
+        .no-data { text-align: center; color: #888; font-size: 1em; margin-top: 24px; }
+    </style>
+</head>
+<body>
+    <h2>API Metrics Visualizer</h2>
+    <button class="refresh-btn" onclick="fetchMetrics()">Refresh Metrics</button>
+    <div class="summary-cards" id="summary-cards"></div>
+    <div class="charts-container">
+        <div class="chart-box">
+            <div class="chart-title">Request Count by Handler</div>
+            <canvas id="requestCountChart"></canvas>
+            <div id="requestCountNoData" class="no-data"></div>
+        </div>
+        <div class="chart-box">
+            <div class="chart-title">Request Latency by Handler (Sum, s)</div>
+            <canvas id="latencyChart"></canvas>
+            <div id="latencyNoData" class="no-data"></div>
+        </div>
+        <div class="chart-box">
+            <div class="chart-title">Error Count (500) by Handler</div>
+            <canvas id="errorRateChart"></canvas>
+            <div id="errorRateNoData" class="no-data"></div>
+        </div>
+        <div class="chart-box gauge-box">
+            <div class="chart-title">In-Progress Requests</div>
+            <canvas id="inProgressGauge" width="180" height="120"></canvas>
+            <div class="gauge-label">Current number of requests being processed</div>
+        </div>
+    </div>
+    <div id="metrics-container"></div>
+    <div class="error" id="error"></div>
+    <script>
+        // Parse Prometheus metrics with labels
+        function parsePrometheusMetrics(text) {
+            const lines = text.split('\n');
+            const metrics = [];
+            for (const line of lines) {
+                if (line.startsWith('#') || !line.trim()) continue;
+                const [nameAndLabels, value] = line.split(/\s+/, 2);
+                if (!nameAndLabels || value === undefined) continue;
+                // Parse labels
+                let name = nameAndLabels;
+                let labels = {};
+                const labelMatch = nameAndLabels.match(/([^{]+){([^}]*)}/);
+                if (labelMatch) {
+                    name = labelMatch[1];
+                    labels = Object.fromEntries(labelMatch[2].split(',').map(pair => {
+                        const [k, v] = pair.split('=');
+                        return [k.trim(), v.trim().replace(/^"|"$/g, '')];
+                    }));
+                }
+                metrics.push({ name, labels, value: parseFloat(value) });
+            }
+            return metrics;
+        }
+        // Aggregate by handler and status
+        function aggregateBy(metrics, metricName, groupBy) {
+            const agg = {};
+            for (const m of metrics) {
+                if (m.name !== metricName) continue;
+                const key = groupBy.map(k => m.labels[k] || '').join(' | ');
+                agg[key] = (agg[key] || 0) + m.value;
+            }
+            return agg;
+        }
+        // Get sum for a metric (optionally filter by label)
+        function sumMetric(metrics, metricName, labelKey, labelValue) {
+            return metrics.filter(m => m.name === metricName && (!labelKey || m.labels[labelKey] === labelValue)).reduce((a, m) => a + m.value, 0);
+        }
+        let requestCountChart, latencyChart, errorRateChart, inProgressGauge;
+        async function fetchMetrics() {
+            document.getElementById('error').textContent = '';
+            const container = document.getElementById('metrics-container');
+            container.innerHTML = 'Loading...';
+            // Clear no-data messages
+            document.getElementById('requestCountNoData').textContent = '';
+            document.getElementById('latencyNoData').textContent = '';
+            document.getElementById('errorRateNoData').textContent = '';
+            try {
+                const resp = await fetch('/metrics');
+                if (!resp.ok) throw new Error('Failed to fetch metrics: ' + resp.status);
+                const text = await resp.text();
+                const metrics = parsePrometheusMetrics(text);
+                // Summary cards
+                const totalReq = sumMetric(metrics, 'http_requests_total');
+                const errorReq = sumMetric(metrics, 'http_requests_total', 'status', '500');
+                const latencySum = sumMetric(metrics, 'http_request_duration_seconds_sum');
+                const latencyCount = sumMetric(metrics, 'http_request_duration_seconds_count');
+                const avgLatency = latencyCount ? (latencySum / latencyCount) : 0;
+                document.getElementById('summary-cards').innerHTML = `
+                    <div class="summary-card">Total Requests<br><b>${totalReq}</b></div>
+                    <div class="summary-card">Errors (500)<br><b>${errorReq}</b></div>
+                    <div class="summary-card">Avg Latency (s)<br><b>${avgLatency.toFixed(3)}</b></div>
+                `;
+                // Chart 1: Request count by handler
+                const reqAgg = aggregateBy(metrics, 'http_requests_total', ['handler']);
+                const reqLabels = Object.keys(reqAgg);
+                const reqValues = Object.values(reqAgg);
+                if (!requestCountChart) {
+                    const ctx = document.getElementById('requestCountChart').getContext('2d');
+                    requestCountChart = new Chart(ctx, {
+                        type: 'bar',
+                        data: { labels: reqLabels, datasets: [{ label: 'Request Count', data: reqValues, backgroundColor: '#1976d2' }] },
+                        options: { responsive: true, plugins: { legend: { display: false }, title: { display: true, text: 'Request Count by Handler' }, tooltip: { enabled: true } }, scales: { x: { title: { display: true, text: 'Handler' } }, y: { beginAtZero: true, title: { display: true, text: 'Count' } } } }
+                    });
+                } else {
+                    requestCountChart.data.labels = reqLabels;
+                    requestCountChart.data.datasets[0].data = reqValues;
+                    requestCountChart.update();
+                }
+                if (reqLabels.length === 0) document.getElementById('requestCountNoData').textContent = 'No request data available.';
+                // Chart 2: Latency by handler
+                const latAgg = aggregateBy(metrics, 'http_request_duration_seconds_sum', ['handler']);
+                const latLabels = Object.keys(latAgg);
+                const latValues = Object.values(latAgg);
+                if (!latencyChart) {
+                    const ctx2 = document.getElementById('latencyChart').getContext('2d');
+                    latencyChart = new Chart(ctx2, {
+                        type: 'bar',
+                        data: { labels: latLabels, datasets: [{ label: 'Request Duration Sum', data: latValues, backgroundColor: '#ffa000' }] },
+                        options: { responsive: true, plugins: { legend: { display: false }, title: { display: true, text: 'Request Latency by Handler (Sum, s)' }, tooltip: { enabled: true } }, scales: { x: { title: { display: true, text: 'Handler' } }, y: { beginAtZero: true, title: { display: true, text: 'Latency (s)' } } } }
+                    });
+                } else {
+                    latencyChart.data.labels = latLabels;
+                    latencyChart.data.datasets[0].data = latValues;
+                    latencyChart.update();
+                }
+                if (latLabels.length === 0) document.getElementById('latencyNoData').textContent = 'No latency data available.';
+                // Chart 3: Error rate by handler (line chart)
+                const errAgg = aggregateBy(metrics, 'http_requests_total', ['handler', 'status']);
+                const errLabels = Object.keys(errAgg).filter(k => k.includes('500'));
+                const errValues = errLabels.map(k => errAgg[k]);
+                if (!errorRateChart) {
+                    const ctx3 = document.getElementById('errorRateChart').getContext('2d');
+                    errorRateChart = new Chart(ctx3, {
+                        type: 'line',
+                        data: { labels: errLabels, datasets: [{ label: 'Error Count (500)', data: errValues, borderColor: '#b71c1c', backgroundColor: 'rgba(183,28,28,0.1)', fill: true }] },
+                        options: { responsive: true, plugins: { legend: { display: false }, title: { display: true, text: 'Error Count (500) by Handler' }, tooltip: { enabled: true } }, scales: { x: { title: { display: true, text: 'Handler | Status' } }, y: { beginAtZero: true, title: { display: true, text: 'Error Count' } } } }
+                    });
+                } else {
+                    errorRateChart.data.labels = errLabels;
+                    errorRateChart.data.datasets[0].data = errValues;
+                    errorRateChart.update();
+                }
+                if (errLabels.length === 0) document.getElementById('errorRateNoData').textContent = 'No error data available.';
+                // Chart 4: In-progress requests (gauge)
+                const inProgress = sumMetric(metrics, 'http_requests_inprogress');
+                const gaugeCanvas = document.getElementById('inProgressGauge');
+                const ctx4 = gaugeCanvas.getContext('2d');
+                ctx4.clearRect(0, 0, gaugeCanvas.width, gaugeCanvas.height);
+                // Draw gauge (simple arc)
+                const maxGauge = 20;
+                const percent = Math.min(inProgress / maxGauge, 1);
+                ctx4.lineWidth = 18;
+                ctx4.strokeStyle = percent < 0.7 ? '#1976d2' : percent < 0.9 ? '#ffa000' : '#b71c1c';
+                ctx4.beginPath();
+                ctx4.arc(90, 100, 60, Math.PI, Math.PI * (1 + percent), false);
+                ctx4.stroke();
+                ctx4.lineWidth = 1;
+                ctx4.strokeStyle = '#ccc';
+                ctx4.beginPath();
+                ctx4.arc(90, 100, 60, Math.PI * (1 + percent), 2 * Math.PI, false);
+                ctx4.stroke();
+                ctx4.font = '1.5em Arial';
+                ctx4.fillStyle = '#1976d2';
+                ctx4.textAlign = 'center';
+                ctx4.fillText(inProgress, 90, 110);
+                // Table for all metrics
+                if (metrics.length === 0) {
+                    container.innerHTML = '<em>No metrics found.</em>';
+                    return;
+                }
+                let html = '<table id="metrics-table"><tr><th>Metric</th><th>Value</th></tr>';
+                for (const m of metrics) {
+                    let labelStr = m.name;
+                    if (Object.keys(m.labels).length > 0) {
+                        labelStr += '{' + Object.entries(m.labels).map(([k, v]) => `${k}="${v}"`).join(',') + '}';
+                    }
+                    html += `<tr><td>${labelStr}</td><td>${m.value}</td></tr>`;
+                }
+                html += '</table>';
+                container.innerHTML = html;
+            } catch (err) {
+                container.innerHTML = '';
+                document.getElementById('error').textContent = err;
+            }
+        }
+        // Fetch metrics on page load
+        fetchMetrics();
+    </script>
+</body>
+</html>

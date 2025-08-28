@@ -23,6 +23,10 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 def root():
     return RedirectResponse(url="/static/index.html")
 
+@app.get("/visualize")
+def visualize():
+    return RedirectResponse(url="/static/metrics.html")
+
 @app.post("/predict")
 async def predict(request: Request):
     api_key = request.headers.get("x-api-key")
