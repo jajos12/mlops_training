@@ -40,6 +40,17 @@ jobs:
             fi
             echo "Waiting for TensorFlow Serving..."; sleep 2
           done
-      - name: Test inference with main.py
+      - name: Start FastAPI Proxy (Uvicorn)
+        run: |
+          nohup uvicorn proxy_api:app --host 0.0.0.0 --port 8000 &
+      - name: Wait for FastAPI Proxy to start
+        run: |
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/docs; then
+              echo "FastAPI Proxy is up!"; break
+            fi
+            echo "Waiting for FastAPI Proxy..."; sleep 2
+          done
+      - name: Test inference with main.py (via FastAPI Proxy)
         run: |
           python main.py
