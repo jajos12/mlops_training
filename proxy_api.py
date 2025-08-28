@@ -1,16 +1,27 @@
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 import requests
 import os
 from prometheus_fastapi_instrumentator import Instrumentator
 from fastapi import Query
+from fastapi.staticfiles import StaticFiles
+from dotenv import load_dotenv
+
+load_dotenv()
 
 app = FastAPI()
 
 TFSERVING_URL = os.environ.get("TFSERVING_URL", "http://localhost:8501/v1/models/my_model:predict")
-VALID_API_KEYS = {"my-secret-key"}  # Replace with your actual key(s) or load securely
+api_keys_env = os.environ.get("API_KEYS", "my-secret-key")
+VALID_API_KEYS = set(k.strip() for k in api_keys_env.split(",") if k.strip())
 
 Instrumentator().instrument(app).expose(app)
+
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+@app.get("/")
+def root():
+    return RedirectResponse(url="/static/index.html")
 
 @app.post("/predict")
 async def predict(request: Request):

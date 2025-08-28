@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Breast Cancer Prediction</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        input[type=number] { width: 80px; }
+        .result { margin-top: 20px; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h2>Breast Cancer Prediction</h2>
+    <form id="predict-form">
+        <div id="features"></div>
+        <button type="submit">Predict</button>
+    </form>
+    <div class="result" id="result"></div>
+    <script>
+        // Feature names (from sklearn breast cancer dataset)
+        const featureNames = [
+            "mean radius", "mean texture", "mean perimeter", "mean area", "mean smoothness",
+            "mean compactness", "mean concavity", "mean concave points", "mean symmetry", "mean fractal dimension",
+            "radius error", "texture error", "perimeter error", "area error", "smoothness error",
+            "compactness error", "concavity error", "concave points error", "symmetry error", "fractal dimension error",
+            "worst radius", "worst texture", "worst perimeter", "worst area", "worst smoothness",
+            "worst compactness", "worst concavity", "worst concave points", "worst symmetry", "worst fractal dimension"
+        ];
+        const featuresDiv = document.getElementById('features');
+        featureNames.forEach((name, idx) => {
+            const label = document.createElement('label');
+            label.textContent = name + ': ';
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.step = 'any';
+            input.required = true;
+            input.name = 'f' + idx;
+            label.appendChild(input);
+            featuresDiv.appendChild(label);
+            featuresDiv.appendChild(document.createElement('br'));
+        });
+        document.getElementById('predict-form').onsubmit = async function(e) {
+            e.preventDefault();
+            const values = Array.from(document.querySelectorAll('#features input')).map(inp => parseFloat(inp.value));
+            const payload = { instances: [values] };
+            const resultDiv = document.getElementById('result');
+            resultDiv.textContent = 'Predicting...';
+            try {
+                const resp = await fetch('/predict', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': 'my-secret-key'
+                    },
+                    body: JSON.stringify(payload)
+                });
+                if (!resp.ok) throw new Error('Request failed: ' + resp.status);
+                const data = await resp.json();
+                if (data.predictions && data.predictions.length > 0) {
+                    const pred = data.predictions[0][0];
+                    resultDiv.textContent = 'Prediction: ' + (pred > 0.5 ? 'Malignant (1)' : 'Benign (0)') + ` (score: ${pred.toFixed(3)})`;
+                } else {
+                    resultDiv.textContent = 'No prediction returned.';
+                }
+            } catch (err) {
+                resultDiv.textContent = 'Error: ' + err;
+            }
+        };
+    </script>
+</body>
+</html>

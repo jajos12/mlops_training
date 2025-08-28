@@ -19,6 +19,8 @@ jobs:
         run: |
           pip install -r requirements.txt
       - name: Run training script
+        env:
+          API_KEYS: ${{ secrets.API_KEYS }}
         run: |
           python train.py
       - name: Upload exported model
@@ -41,6 +43,8 @@ jobs:
             echo "Waiting for TensorFlow Serving..."; sleep 2
           done
       - name: Start FastAPI Proxy (Uvicorn)
+        env:
+          API_KEYS: ${{ secrets.API_KEYS }}
         run: |
           nohup uvicorn proxy_api:app --host 0.0.0.0 --port 8000 &
       - name: Wait for FastAPI Proxy to start
@@ -52,8 +56,12 @@ jobs:
             echo "Waiting for FastAPI Proxy..."; sleep 2
           done
       - name: Test inference with main.py (via FastAPI Proxy)
+        env:
+          API_KEYS: ${{ secrets.API_KEYS }}
         run: |
           python main.py
       - name: Run canary test (compare previous and new model)
+        env:
+          API_KEYS: ${{ secrets.API_KEYS }}
         run: |
           python canary_test.py --version_a=1 --version_b=2
